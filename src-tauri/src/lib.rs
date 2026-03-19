@@ -59,6 +59,16 @@ fn configure_clients(request: ConfigRequest) -> Vec<ConfigResult> {
 
     if has_env_clients {
         let _ = generate_profile_scripts(&request.claude_token, &request.gpt_token);
+
+        // Save AiClaude token for switch_profile to re-apply later
+        if let Some(ref token) = request.claude_token {
+            let dir = clients::claude_code::profile_dir();
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::fs::write(
+                dir.join("aiclaude.json"),
+                serde_json::json!({ "apiKey": token.api_key, "baseUrl": token.base_url }).to_string(),
+            );
+        }
     }
 
     results
@@ -213,96 +223,84 @@ fn generate_profile_scripts(
     Ok(())
 }
 
-/// Switch environment variables to AiClaude or back to original.
+/// Switch Claude Code config: modify ~/.claude/settings.json env block.
 /// `profile` is either "aiclaude" or "original".
 #[tauri::command]
 fn switch_profile(profile: String) -> Result<String, String> {
-    let dir = clients::claude_code::profile_dir();
+    let settings_file = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".claude")
+        .join("settings.json");
 
-    if cfg!(windows) {
-        // Read the corresponding .ps1 script and parse env var assignments
-        let script_name = if profile == "aiclaude" { "use-aiclaude.ps1" } else { "use-original.ps1" };
-        let script_path = dir.join(script_name);
-        if !script_path.exists() {
-            return Err(format!("脚本不存在: {}", script_path.display()));
+    if profile == "original" {
+        // Restore from backup: find the latest backup of settings.json
+        let backup_root = clients::backup_dir();
+        if backup_root.exists() {
+            let mut backups: Vec<_> = std::fs::read_dir(&backup_root)
+                .map_err(|e| e.to_string())?
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_name().to_string_lossy().ends_with("settings.json"))
+                .collect();
+            backups.sort_by_key(|e| e.file_name());
+
+            if let Some(latest) = backups.last() {
+                std::fs::copy(latest.path(), &settings_file).map_err(|e| e.to_string())?;
+                return Ok("已切回原配置".to_string());
+            }
         }
-        let content = std::fs::read_to_string(&script_path).map_err(|e| e.to_string())?;
 
-        for line in content.lines() {
-            let trimmed = line.trim();
-            // $env:VAR="value"
-            if trimmed.starts_with("$env:") {
-                if let Some(eq_pos) = trimmed.find('=') {
-                    let key = &trimmed[5..eq_pos];
-                    let val = trimmed[eq_pos+1..].trim_matches('"');
-                    clients::claude_code::set_windows_user_env(key, val)?;
+        // No backup found — just remove the env block
+        if settings_file.exists() {
+            let content = std::fs::read_to_string(&settings_file).map_err(|e| e.to_string())?;
+            if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(env) = json.get_mut("env").and_then(|e| e.as_object_mut()) {
+                    env.remove("ANTHROPIC_AUTH_TOKEN");
+                    env.remove("ANTHROPIC_BASE_URL");
                 }
-            }
-            // Remove-Item Env:\VAR
-            if trimmed.starts_with("Remove-Item Env:\\") {
-                let key = &trimmed[17..];
-                // Set to empty string to "unset" at user level
-                clients::claude_code::set_windows_user_env(key, "")?;
+                std::fs::write(
+                    &settings_file,
+                    serde_json::to_string_pretty(&json).unwrap_or_default(),
+                ).map_err(|e| e.to_string())?;
             }
         }
-    } else {
-        // On macOS/Linux, parse the .sh script and set via writing to shell rc
-        let script_name = if profile == "aiclaude" { "use-aiclaude.sh" } else { "use-original.sh" };
-        let script_path = dir.join(script_name);
-        if !script_path.exists() {
-            return Err(format!("脚本不存在: {}", script_path.display()));
-        }
-        let content = std::fs::read_to_string(&script_path).map_err(|e| e.to_string())?;
-
-        let mut vars: Vec<(&str, &str)> = Vec::new();
-        let mut unsets: Vec<&str> = Vec::new();
-
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("export ") {
-                if let Some(eq_pos) = trimmed.find('=') {
-                    let key = &trimmed[7..eq_pos];
-                    let val = trimmed[eq_pos+1..].trim_matches('"');
-                    vars.push((key, val));
-                }
-            }
-            if trimmed.starts_with("unset ") {
-                unsets.push(&trimmed[6..]);
-            }
-        }
-
-        // Determine shell rc file
-        let home = dirs::home_dir().unwrap_or_default();
-        let rc_file = if home.join(".zshrc").exists() { home.join(".zshrc") } else { home.join(".bashrc") };
-
-        let mut rc_content = if rc_file.exists() {
-            std::fs::read_to_string(&rc_file).map_err(|e| e.to_string())?
-        } else {
-            String::new()
-        };
-
-        // Remove all related lines first
-        let all_keys: Vec<&str> = vars.iter().map(|(k,_)| *k).chain(unsets.iter().copied()).collect();
-        let mut lines: Vec<String> = rc_content.lines()
-            .filter(|l| {
-                let t = l.trim();
-                !all_keys.iter().any(|k| t.starts_with(&format!("export {}=", k)) || t.starts_with(&format!("{}=", k)))
-            })
-            .map(|l| l.to_string())
-            .collect();
-
-        // Add new exports (skip unsets — just don't add them)
-        for (key, val) in &vars {
-            lines.push(format!("export {}=\"{}\"", key, val));
-        }
-
-        rc_content = lines.join("\n");
-        if !rc_content.ends_with('\n') { rc_content.push('\n'); }
-        std::fs::write(&rc_file, rc_content).map_err(|e| e.to_string())?;
+        return Ok("已切回原配置（已移除 AiClaude 环境变量）".to_string());
     }
 
-    let label = if profile == "aiclaude" { "AiClaude" } else { "原配置" };
-    Ok(format!("已切换到 {}", label))
+    // "aiclaude" — re-apply the saved AiClaude config
+    // Read the aiclaude token from the profile dir
+    let aiclaude_config = clients::claude_code::profile_dir().join("aiclaude.json");
+    if aiclaude_config.exists() {
+        let content = std::fs::read_to_string(&aiclaude_config).map_err(|e| e.to_string())?;
+        if let Ok(saved) = serde_json::from_str::<serde_json::Value>(&content) {
+            let mut json: serde_json::Value = if settings_file.exists() {
+                let c = std::fs::read_to_string(&settings_file).map_err(|e| e.to_string())?;
+                serde_json::from_str(&c).unwrap_or(serde_json::json!({}))
+            } else {
+                serde_json::json!({})
+            };
+
+            if json.get("env").is_none() {
+                json["env"] = serde_json::json!({});
+            }
+            if let Some(token) = saved.get("apiKey").and_then(|v| v.as_str()) {
+                json["env"]["ANTHROPIC_AUTH_TOKEN"] = serde_json::json!(token);
+            }
+            if let Some(url) = saved.get("baseUrl").and_then(|v| v.as_str()) {
+                json["env"]["ANTHROPIC_BASE_URL"] = serde_json::json!(url);
+            }
+
+            let dir = settings_file.parent().unwrap();
+            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            std::fs::write(
+                &settings_file,
+                serde_json::to_string_pretty(&json).unwrap_or_default(),
+            ).map_err(|e| e.to_string())?;
+
+            return Ok("已切换到 AiClaude".to_string());
+        }
+    }
+
+    Err("未找到 AiClaude 配置，请先配置一次".to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

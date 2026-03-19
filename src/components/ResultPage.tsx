@@ -84,7 +84,7 @@ export function ResultPage({ results, profileScripts, onBack }: Props) {
                 <div style={{ fontSize: 12, color: "var(--green)", marginBottom: 8, fontWeight: 500 }}>
                   ✅ 切换到 AiClaude
                 </div>
-                <div style={{ fontSize: 11, color: "var(--text-dim)" }}>设置用户环境变量，新终端窗口生效</div>
+                <div style={{ fontSize: 11, color: "var(--text-dim)" }}>修改 ~/.claude/settings.json，立即生效</div>
               </button>
               <button
                 className="profile-card-item"
@@ -95,7 +95,7 @@ export function ResultPage({ results, profileScripts, onBack }: Props) {
                 <div style={{ fontSize: 12, color: "var(--orange)", marginBottom: 8, fontWeight: 500 }}>
                   🔙 切回原配置
                 </div>
-                <div style={{ fontSize: 11, color: "var(--text-dim)" }}>恢复原始环境变量</div>
+                <div style={{ fontSize: 11, color: "var(--text-dim)" }}>从备份恢复 settings.json</div>
               </button>
             </div>
             {switchMsg && (
