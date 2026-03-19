@@ -1,5 +1,5 @@
 use super::*;
-use super::claude_code::{which_cmd, write_env_vars, write_profile_scripts};
+use super::claude_code::{which_cmd, write_env_vars, write_profile_scripts, set_windows_user_env};
 use std::path::PathBuf;
 
 pub struct CodexClient;
@@ -81,15 +81,20 @@ impl ClientConfigurator for CodexClient {
         let had_existing = Self::has_existing_env_vars().is_some();
 
         if cfg!(windows) {
-            match write_profile_scripts(
+            let set_result = set_windows_user_env("OPENAI_API_KEY", &token.api_key)
+                .and_then(|_| set_windows_user_env("OPENAI_BASE_URL", &token.base_url));
+
+            let _ = write_profile_scripts(
                 "OPENAI_API_KEY", &token.api_key,
                 "OPENAI_BASE_URL", &token.base_url,
-            ) {
+            );
+
+            match set_result {
                 Ok(_) => ConfigResult {
                     client_id: ClientId::Codex,
                     client_name: "Codex CLI".to_string(),
                     success: true,
-                    message: "已生成 PowerShell 配置脚本".to_string(),
+                    message: "已设置用户环境变量（新终端窗口生效）".to_string(),
                     config_path: Some(super::claude_code::profile_dir().to_string_lossy().to_string()),
                     had_existing,
                 },
@@ -97,7 +102,7 @@ impl ClientConfigurator for CodexClient {
                     client_id: ClientId::Codex,
                     client_name: "Codex CLI".to_string(),
                     success: false,
-                    message: format!("写入失败: {}", e),
+                    message: format!("设置环境变量失败: {}", e),
                     config_path: None,
                     had_existing,
                 },

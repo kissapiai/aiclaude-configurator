@@ -89,18 +89,24 @@ impl ClientConfigurator for ClaudeCodeClient {
         let had_existing = Self::has_existing_env_vars().is_some();
 
         if cfg!(windows) {
-            // Write to profile switch scripts only on Windows
-            match write_profile_scripts(
+            // Set persistent user-level environment variables on Windows
+            let set_result = set_windows_user_env("ANTHROPIC_API_KEY", &token.api_key)
+                .and_then(|_| set_windows_user_env("ANTHROPIC_BASE_URL", &token.base_url));
+
+            // Also generate profile scripts for switching
+            let _ = write_profile_scripts(
                 "ANTHROPIC_API_KEY",
                 &token.api_key,
                 "ANTHROPIC_BASE_URL",
                 &token.base_url,
-            ) {
+            );
+
+            match set_result {
                 Ok(_) => ConfigResult {
                     client_id: ClientId::ClaudeCode,
                     client_name: "Claude Code".to_string(),
                     success: true,
-                    message: "已生成 PowerShell 配置脚本".to_string(),
+                    message: "已设置用户环境变量（新终端窗口生效）".to_string(),
                     config_path: Some(profile_dir().to_string_lossy().to_string()),
                     had_existing,
                 },
@@ -108,7 +114,7 @@ impl ClientConfigurator for ClaudeCodeClient {
                     client_id: ClientId::ClaudeCode,
                     client_name: "Claude Code".to_string(),
                     success: false,
-                    message: format!("写入失败: {}", e),
+                    message: format!("设置环境变量失败: {}", e),
                     config_path: None,
                     had_existing,
                 },
@@ -214,6 +220,26 @@ pub fn write_env_vars(file: &PathBuf, vars: &[(&str, &str)]) -> Result<(), Strin
     }
 
     std::fs::write(file, content).map_err(|e| e.to_string())
+}
+
+pub fn set_windows_user_env(key: &str, value: &str) -> Result<(), String> {
+    // Use PowerShell to set persistent user-level environment variable
+    let script = format!(
+        "[Environment]::SetEnvironmentVariable('{}', '{}', 'User')",
+        key.replace("'", "''"),
+        value.replace("'", "''")
+    );
+    let output = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &script])
+        .output()
+        .map_err(|e| format!("Failed to run powershell: {}", e))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("PowerShell error: {}", stderr))
+    }
 }
 
 pub fn write_profile_scripts(

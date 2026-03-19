@@ -9,13 +9,20 @@ import "./index.css";
 
 type Page = "configure" | "result" | "settings";
 
+function loadSaved<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch { return fallback; }
+}
+
 export default function App() {
   const [page, setPage] = useState<Page>("configure");
   const [clients, setClients] = useState<ClientInfo[]>([]);
   const [selectedClients, setSelectedClients] = useState<Set<ClientId>>(new Set());
-  const [claudeToken, setClaudeToken] = useState<TokenConfig>({ apiKey: "", baseUrl: "https://api.aiclaude.xyz" });
-  const [gptToken, setGptToken] = useState<TokenConfig>({ apiKey: "", baseUrl: "https://api.aiclaude.xyz/v1" });
-  const [sameToken, setSameToken] = useState(true);
+  const [claudeToken, setClaudeToken] = useState<TokenConfig>(() => loadSaved("claudeToken", { apiKey: "", baseUrl: "https://api.aiclaude.xyz" }));
+  const [gptToken, setGptToken] = useState<TokenConfig>(() => loadSaved("gptToken", { apiKey: "", baseUrl: "https://api.aiclaude.xyz/v1" }));
+  const [sameToken, setSameToken] = useState(() => loadSaved("sameToken", true));
   const [results, setResults] = useState<ConfigResult[]>([]);
   const [profileScripts, setProfileScripts] = useState<ProfileScripts | null>(null);
   const [configuring, setConfiguring] = useState(false);
@@ -23,6 +30,10 @@ export default function App() {
   useEffect(() => {
     detectClients();
   }, []);
+
+  useEffect(() => { localStorage.setItem("claudeToken", JSON.stringify(claudeToken)); }, [claudeToken]);
+  useEffect(() => { localStorage.setItem("gptToken", JSON.stringify(gptToken)); }, [gptToken]);
+  useEffect(() => { localStorage.setItem("sameToken", JSON.stringify(sameToken)); }, [sameToken]);
 
   async function detectClients() {
     try {
