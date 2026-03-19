@@ -213,6 +213,98 @@ fn generate_profile_scripts(
     Ok(())
 }
 
+/// Switch environment variables to AiClaude or back to original.
+/// `profile` is either "aiclaude" or "original".
+#[tauri::command]
+fn switch_profile(profile: String) -> Result<String, String> {
+    let dir = clients::claude_code::profile_dir();
+
+    if cfg!(windows) {
+        // Read the corresponding .ps1 script and parse env var assignments
+        let script_name = if profile == "aiclaude" { "use-aiclaude.ps1" } else { "use-original.ps1" };
+        let script_path = dir.join(script_name);
+        if !script_path.exists() {
+            return Err(format!("脚本不存在: {}", script_path.display()));
+        }
+        let content = std::fs::read_to_string(&script_path).map_err(|e| e.to_string())?;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            // $env:VAR="value"
+            if trimmed.starts_with("$env:") {
+                if let Some(eq_pos) = trimmed.find('=') {
+                    let key = &trimmed[5..eq_pos];
+                    let val = trimmed[eq_pos+1..].trim_matches('"');
+                    clients::claude_code::set_windows_user_env(key, val)?;
+                }
+            }
+            // Remove-Item Env:\VAR
+            if trimmed.starts_with("Remove-Item Env:\\") {
+                let key = &trimmed[17..];
+                // Set to empty string to "unset" at user level
+                clients::claude_code::set_windows_user_env(key, "")?;
+            }
+        }
+    } else {
+        // On macOS/Linux, parse the .sh script and set via writing to shell rc
+        let script_name = if profile == "aiclaude" { "use-aiclaude.sh" } else { "use-original.sh" };
+        let script_path = dir.join(script_name);
+        if !script_path.exists() {
+            return Err(format!("脚本不存在: {}", script_path.display()));
+        }
+        let content = std::fs::read_to_string(&script_path).map_err(|e| e.to_string())?;
+
+        let mut vars: Vec<(&str, &str)> = Vec::new();
+        let mut unsets: Vec<&str> = Vec::new();
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("export ") {
+                if let Some(eq_pos) = trimmed.find('=') {
+                    let key = &trimmed[7..eq_pos];
+                    let val = trimmed[eq_pos+1..].trim_matches('"');
+                    vars.push((key, val));
+                }
+            }
+            if trimmed.starts_with("unset ") {
+                unsets.push(&trimmed[6..]);
+            }
+        }
+
+        // Determine shell rc file
+        let home = dirs::home_dir().unwrap_or_default();
+        let rc_file = if home.join(".zshrc").exists() { home.join(".zshrc") } else { home.join(".bashrc") };
+
+        let mut rc_content = if rc_file.exists() {
+            std::fs::read_to_string(&rc_file).map_err(|e| e.to_string())?
+        } else {
+            String::new()
+        };
+
+        // Remove all related lines first
+        let all_keys: Vec<&str> = vars.iter().map(|(k,_)| *k).chain(unsets.iter().copied()).collect();
+        let mut lines: Vec<String> = rc_content.lines()
+            .filter(|l| {
+                let t = l.trim();
+                !all_keys.iter().any(|k| t.starts_with(&format!("export {}=", k)) || t.starts_with(&format!("{}=", k)))
+            })
+            .map(|l| l.to_string())
+            .collect();
+
+        // Add new exports (skip unsets — just don't add them)
+        for (key, val) in &vars {
+            lines.push(format!("export {}=\"{}\"", key, val));
+        }
+
+        rc_content = lines.join("\n");
+        if !rc_content.ends_with('\n') { rc_content.push('\n'); }
+        std::fs::write(&rc_file, rc_content).map_err(|e| e.to_string())?;
+    }
+
+    let label = if profile == "aiclaude" { "AiClaude" } else { "原配置" };
+    Ok(format!("已切换到 {}", label))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -222,6 +314,7 @@ pub fn run() {
             configure_clients,
             verify_token,
             get_profile_scripts,
+            switch_profile,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

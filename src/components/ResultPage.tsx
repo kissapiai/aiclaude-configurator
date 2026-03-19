@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { ConfigResult, ProfileScripts } from "../types";
 
 interface Props {
@@ -9,10 +11,25 @@ interface Props {
 export function ResultPage({ results, profileScripts, onBack }: Props) {
   const successCount = results.filter(r => r.success).length;
   const failCount = results.filter(r => !r.success).length;
+  const [switchMsg, setSwitchMsg] = useState<string | null>(null);
+  const [switching, setSwitching] = useState(false);
 
   const hasEnvClients = results.some(
     r => r.success && (r.clientId === "ClaudeCode" || r.clientId === "Codex")
   );
+
+  async function handleSwitch(profile: "aiclaude" | "original") {
+    setSwitching(true);
+    setSwitchMsg(null);
+    try {
+      const msg = await invoke<string>("switch_profile", { profile });
+      setSwitchMsg(msg);
+    } catch (e: any) {
+      setSwitchMsg(`❌ ${e}`);
+    } finally {
+      setSwitching(false);
+    }
+  }
 
   return (
     <div className="main-content">
@@ -45,36 +62,47 @@ export function ResultPage({ results, profileScripts, onBack }: Props) {
         </div>
       </div>
 
-      {/* Profile Switch Scripts */}
+      {/* Profile Switch */}
       {hasEnvClients && profileScripts && (
         <div className="section">
-          <div className="section-title">🔄 Profile 切换脚本</div>
+          <div className="section-title">🔄 环境切换</div>
           <div className="token-card">
             <div className="multi-token-hint" style={{
               background: "rgba(108,92,231,0.08)",
               borderColor: "rgba(108,92,231,0.2)",
               color: "#a78bfa",
             }}>
-              💡 检测到 Claude Code 和 Codex CLI 有原配置，已生成切换脚本，可随时切回
+              💡 检测到原配置已备份，可一键切换
             </div>
             <div className="profile-card-grid">
-              <div className="profile-card-item">
+              <button
+                className="profile-card-item"
+                style={{ cursor: "pointer", border: "1px solid var(--green)", background: "rgba(0,255,0,0.05)" }}
+                disabled={switching}
+                onClick={() => handleSwitch("aiclaude")}
+              >
                 <div style={{ fontSize: 12, color: "var(--green)", marginBottom: 8, fontWeight: 500 }}>
-                  切换到 AiClaude
+                  ✅ 切换到 AiClaude
                 </div>
-                <code>source ~/.aiclaude/use-aiclaude.sh</code>
-              </div>
-              <div className="profile-card-item">
+                <div style={{ fontSize: 11, color: "var(--text-dim)" }}>设置用户环境变量，新终端窗口生效</div>
+              </button>
+              <button
+                className="profile-card-item"
+                style={{ cursor: "pointer", border: "1px solid var(--orange)", background: "rgba(255,165,0,0.05)" }}
+                disabled={switching}
+                onClick={() => handleSwitch("original")}
+              >
                 <div style={{ fontSize: 12, color: "var(--orange)", marginBottom: 8, fontWeight: 500 }}>
-                  切回原配置
+                  🔙 切回原配置
                 </div>
-                <code>source ~/.aiclaude/use-original.sh</code>
+                <div style={{ fontSize: 11, color: "var(--text-dim)" }}>恢复原始环境变量</div>
+              </button>
+            </div>
+            {switchMsg && (
+              <div style={{ marginTop: 10, fontSize: 12, color: switchMsg.startsWith("❌") ? "var(--red)" : "var(--green)" }}>
+                {switchMsg}
               </div>
-            </div>
-            <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 10 }}>
-              Windows 用户：运行 <code style={{ fontSize: 11 }}>~\.aiclaude\use-aiclaude.ps1</code> 或{" "}
-              <code style={{ fontSize: 11 }}>~\.aiclaude\use-original.ps1</code>
-            </div>
+            )}
           </div>
         </div>
       )}
