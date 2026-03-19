@@ -134,14 +134,14 @@ fn generate_profile_scripts(
     let mut original_lines = Vec::new();
 
     if let Some(token) = claude {
-        aiclaude_lines.push(format!("export ANTHROPIC_API_KEY=\"{}\"", token.api_key));
+        aiclaude_lines.push(format!("export ANTHROPIC_AUTH_TOKEN=\"{}\"", token.api_key));
         aiclaude_lines.push(format!("export ANTHROPIC_BASE_URL=\"{}\"", token.base_url));
 
         // Try to capture original values
-        if let Ok(val) = std::env::var("ANTHROPIC_API_KEY") {
-            original_lines.push(format!("export ANTHROPIC_API_KEY=\"{}\"", val));
+        if let Ok(val) = std::env::var("ANTHROPIC_AUTH_TOKEN") {
+            original_lines.push(format!("export ANTHROPIC_AUTH_TOKEN=\"{}\"", val));
         } else {
-            original_lines.push("unset ANTHROPIC_API_KEY".to_string());
+            original_lines.push("unset ANTHROPIC_AUTH_TOKEN".to_string());
         }
         if let Ok(val) = std::env::var("ANTHROPIC_BASE_URL") {
             original_lines.push(format!("export ANTHROPIC_BASE_URL=\"{}\"", val));

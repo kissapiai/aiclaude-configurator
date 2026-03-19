@@ -100,7 +100,7 @@ impl ClientConfigurator for CursorClient {
         };
 
         json["claude-code.environmentVariables"] = serde_json::json!({
-            "ANTHROPIC_API_KEY": token.api_key,
+            "ANTHROPIC_AUTH_TOKEN": token.api_key,
             "ANTHROPIC_BASE_URL": token.base_url
         });
 

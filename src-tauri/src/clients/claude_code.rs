@@ -26,15 +26,15 @@ impl ClaudeCodeClient {
 
     fn has_existing_env_vars() -> Option<String> {
         if cfg!(windows) {
-            std::env::var("ANTHROPIC_API_KEY").ok()
+            std::env::var("ANTHROPIC_AUTH_TOKEN").ok()
         } else {
             let env_file = Self::env_file();
             if env_file.exists() {
                 let content = std::fs::read_to_string(&env_file).unwrap_or_default();
-                if content.contains("ANTHROPIC_API_KEY") {
+                if content.contains("ANTHROPIC_AUTH_TOKEN") {
                     // Extract existing key (masked)
                     for line in content.lines() {
-                        if line.contains("ANTHROPIC_API_KEY") && !line.trim_start().starts_with('#') {
+                        if line.contains("ANTHROPIC_AUTH_TOKEN") && !line.trim_start().starts_with('#') {
                             return Some(line.to_string());
                         }
                     }
@@ -90,12 +90,12 @@ impl ClientConfigurator for ClaudeCodeClient {
 
         if cfg!(windows) {
             // Set persistent user-level environment variables on Windows
-            let set_result = set_windows_user_env("ANTHROPIC_API_KEY", &token.api_key)
+            let set_result = set_windows_user_env("ANTHROPIC_AUTH_TOKEN", &token.api_key)
                 .and_then(|_| set_windows_user_env("ANTHROPIC_BASE_URL", &token.base_url));
 
             // Also generate profile scripts for switching
             let _ = write_profile_scripts(
-                "ANTHROPIC_API_KEY",
+                "ANTHROPIC_AUTH_TOKEN",
                 &token.api_key,
                 "ANTHROPIC_BASE_URL",
                 &token.base_url,
@@ -124,7 +124,7 @@ impl ClientConfigurator for ClaudeCodeClient {
             match write_env_vars(
                 &env_file,
                 &[
-                    ("ANTHROPIC_API_KEY", &token.api_key),
+                    ("ANTHROPIC_AUTH_TOKEN", &token.api_key),
                     ("ANTHROPIC_BASE_URL", &token.base_url),
                 ],
             ) {
